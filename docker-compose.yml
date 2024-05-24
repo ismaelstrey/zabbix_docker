@@ -1,0 +1,95 @@
+services:
+  db:
+    image: postgres:13-alpine
+    container_name: postgres-zabbix
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: mysecretpassword
+      POSTGRES_DB: zabbix
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - zabbix
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-5.4-latest
+    container_name: zabbix-server
+    restart: unless-stopped
+    environment:
+      DB_SERVER_HOST: ${DB_SERVER_HOST}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      ZBX_LISTENPORT: ${ZBX_LISTENPORT}
+      ZABBIX_JAVA_GATEWAY_PORT: ${ZABBIX_JAVA_GATEWAY_PORT}
+      ZBX_NODEADDRESSPORT: ${ZBX_NODEADDRESSPORT}
+      ZABBIX_AGENT_PORT: ${ZABBIX_AGENT_PORT}
+      ZABBIX_AGENT2_PORT: ${ZABBIX_AGENT2_PORT}
+    volumes:
+      - zabbix-server:/var/lib/zabbix  
+    networks:
+      - zabbix
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-5.4-latest
+    container_name: zabbix-web
+    restart: unless-stopped
+    environment:
+      DB_SERVER_HOST: ${DB_SERVER_HOST}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PHP_TZ: ${PHP_TZ}
+      ZBX_SERVER_HOST: ${ZBX_SERVER_HOST}
+    networks:
+      - zabbix
+    ports:
+      - "${ZBX_WEB_PORT}:${TRAEFIK_HTTP_PORT_INTERNA}"
+      - "${ZBX_WEB_HTTPS}:${ZBX_WEB_HTTPS}"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.zabbix-web.rule=Host(`zabbix.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.zabbix-web.entrypoints=http"
+      - "traefik.http.middlewares.zabbix-stripprefix.stripprefix.prefixes=/zabbix"
+      - "traefik.http.routers.zabbix-web.middlewares=zabbix-stripprefix"
+      - "traefik.http.services.zabbix-web.loadbalancer.server.port=${ZBX_WEB_PORT}"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+       - "${GRAFANA_WEB_PORT}:${GRAFANA_WEB_PORT}"
+    command: "grafana-cli plugins install alexanderzobnin-zabbix-app"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.grafana.entrypoints=http"
+      - "traefik.http.services.grafana.loadbalancer.server.port=${GRAFANA_WEB_PORT}"
+    networks:
+      - zabbix
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.http.address=:${TRAEFIK_HTTP_PORT}
+    ports:
+      - "${TRAEFIK_HTTP_PORT}:${TRAEFIK_HTTP_PORT}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - zabbix
+
+networks:
+  zabbix:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  zabbix-server:
